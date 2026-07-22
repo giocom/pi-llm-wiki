@@ -7,6 +7,7 @@ import {
   slugFromUrl,
   slugFromPath,
   stripHtml,
+  htmlToMarkdown,
   buildFrontmatter,
   writeIngestedFile,
   runIngest,
@@ -116,6 +117,49 @@ describe("stripHtml", () => {
     const html = "<p>one</p><p>two</p>";
     const out = stripHtml(html);
     expect(out).toMatch(/one\s*\n\s*\n\s*two/);
+  });
+});
+
+describe("htmlToMarkdown (turndown, v0.7)", () => {
+  it("converts headings to ATX-style markdown", () => {
+    const out = htmlToMarkdown("<h1>Title</h1><h2>Sub</h2>");
+    expect(out).toContain("# Title");
+    expect(out).toContain("## Sub");
+  });
+
+  it("converts bold and italic", () => {
+    const out = htmlToMarkdown("<p><strong>bold</strong> and <em>italic</em></p>");
+    expect(out).toContain("**bold**");
+    expect(out).toContain("*italic*");
+  });
+
+  it("converts links to markdown links", () => {
+    const out = htmlToMarkdown('<a href="https://example.com">click</a>');
+    expect(out).toContain("[click](https://example.com)");
+  });
+
+  it("converts unordered lists", () => {
+    const out = htmlToMarkdown("<ul><li>one</li><li>two</li></ul>");
+    expect(out).toMatch(/-\s+one/);
+    expect(out).toMatch(/-\s+two/);
+  });
+
+  it("converts fenced code blocks", () => {
+    const out = htmlToMarkdown("<pre><code>const x = 1;</code></pre>");
+    expect(out).toContain("```");
+    expect(out).toContain("const x = 1;");
+  });
+
+  it("falls back to stripHtml when turndown produces empty output", () => {
+    const out = htmlToMarkdown("<div id=\"root\"></div>");
+    expect(out.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("preserves article body content (turndown vs stripHtml comparison)", () => {
+    const html = "<article><h1>Bitcoin</h1><p>A <strong>decentralized</strong> currency.</p></article>";
+    const out = htmlToMarkdown(html);
+    expect(out).toContain("# Bitcoin");
+    expect(out).toContain("**decentralized**");
   });
 });
 

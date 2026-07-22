@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import TurndownService from "turndown";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -140,6 +141,32 @@ export function stripHtml(html: string): string {
   return s.trim();
 }
 
+/**
+ * HTML → Markdown via turndown. Used for URL ingest in v0.7+.
+ * Falls back to `stripHtml` if turndown throws or produces an empty result.
+ *
+ * The `_url` parameter is reserved for future use (turndown plugins like
+ * turndown-plugin-gfm can resolve relative URLs to absolute).
+ */
+export function htmlToMarkdown(html: string, _url?: string): string {
+  let markdown: string;
+  try {
+    const td = new TurndownService({
+      headingStyle: "atx",
+      codeBlockStyle: "fenced",
+      bulletListMarker: "-",
+      emDelimiter: "*",
+    });
+    markdown = td.turndown(html);
+  } catch {
+    return stripHtml(html);
+  }
+  if (markdown.trim().length === 0) {
+    return stripHtml(html);
+  }
+  return markdown;
+}
+
 // ─── Frontmatter (v0.1, hand-rolled YAML) ─────────────────────────────
 
 /**
@@ -242,7 +269,7 @@ export async function runIngest(hub: string, input: IngestInput): Promise<Ingest
       };
     }
 
-    body = stripHtml(html);
+    body = htmlToMarkdown(html, input.url);
   } else {
     // file
     if (!existsSync(input.path)) {

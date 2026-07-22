@@ -13,7 +13,8 @@ stays small and the data stays in your local `~/wiki/` hub.
 
 | Version | Features |
 |---|---|
-| **v0.6** (current) | Adds `/wiki:add` (ingest + compile in one call) on top of v0.5 |
+| **v0.7** (current) | URL ingest uses `turndown` for proper HTML→Markdown (was naive regex in v0.1–v0.6) |
+| v0.6 | `/wiki:add` (ingest + compile in one call) |
 | v0.5 | `/wiki:search` (LLM-driven web search + auto-ingest) |
 | v0.4 | `ingest`, `ls`, `show`, `compile`, `query`, `lint`, `index` + auto-rebuilt `_index.md` |
 | v0.3 | Auto-rebuild `raw/articles/_index.md` on ingest/compile |
@@ -193,6 +194,12 @@ The extension depends on (does not bundle):
 
 `@earendil-works/pi-ai` is only required for `compile` and `query`. Other
 features (`ingest`, `ls`, `show`, `lint`, `index`) work without it.
+
+### Bundled runtime dependencies
+
+- `turndown` — HTML → Markdown converter, used by URL ingest in v0.7+
+  for proper output (preserves headings, bold, lists, links, code blocks).
+  Falls back to a naive regex stripper for SPA shells or malformed HTML.
 
 ## License
 
