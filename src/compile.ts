@@ -129,11 +129,19 @@ export async function compileOne(
 
   let articleBody: string;
   if (llm === null) {
-    // dry-run / test mode: pass through the source body, trimmed
     articleBody = body.trim();
   } else {
     const prompt = buildCompilePrompt(meta, body);
     const result = await llm(prompt);
+    if (!result.text || result.text.trim().length === 0) {
+      return {
+        ok: false,
+        error:
+          `LLM returned an empty summary for "${title}" (model: ${result.modelId}). ` +
+          `The source body is ${body.length} chars, so this is not an empty-source issue. ` +
+          `Try a different model, or run /wiki:add with --no-compile to inspect the raw.`,
+      };
+    }
     articleBody = result.text;
   }
 
