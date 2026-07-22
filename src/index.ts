@@ -26,7 +26,7 @@ import { parseSearchArgs, buildSearchHint } from "./search.js";
 import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
 import { buildContextForPrompt } from "./context.js";
-import { buildAgentsContext } from "./agents.js";
+import { buildAgentsContext, hasWikiTrigger } from "./agents.js";
 
 // ─── Hub resolution + config (v0.2 + v0.9) ───────────────────────────
 
@@ -609,10 +609,10 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── before_agent_start (v0.8 + v0.11) — auto-inject context ───────
+  // ── before_agent_start (v0.8 + v0.12) — gated auto-inject ───────
   pi.on("before_agent_start", (event) => {
     const lang = resolveLang();
-    const agents = buildAgentsContext(lang);
+    const agents = hasWikiTrigger(event.prompt) ? buildAgentsContext(lang) : null;
     const hub = resolveHubPath();
     const wiki = hub ? buildContextForPrompt(hub, event.prompt) : null;
     if (!agents && !wiki) return;

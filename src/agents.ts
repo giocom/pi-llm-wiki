@@ -92,3 +92,52 @@ export function buildAgentsContext(lang?: string | null): string | null {
     body,
   ].join("\n");
 }
+
+/**
+ * Trigger words/phrases that indicate the user is asking for a wiki
+ * operation. Match is case-insensitive substring on the lowercased
+ * prompt. Single-word matches use word boundaries so e.g. "wiki" in
+ * "wikipedia" does NOT trigger; explicit phrase matches (`/wiki:`)
+ * are checked as plain substrings.
+ */
+const WIKI_TRIGGERS: ReadonlyArray<string> = [
+  "/wiki",
+  "wiki-",
+  "wiki ",
+  "wiki:",
+  "wiki.",
+  "wiki,",
+  "wiki로",
+  "wiki에",
+  "wiki의",
+  "위키",
+  "워크",
+  "워키",
+  "정리해",
+  "정리 좀",
+  "요약해",
+  "컴파일",
+  "만들어",
+  "작성해",
+  "인덱스",
+  "ingest",
+  "compile",
+  "query",
+  "merge",
+  "lint",
+];
+
+/**
+ * Return true if the prompt contains any wiki-related trigger word or
+ * phrase. Used by the before_agent_start hook to gate AGENTS.md
+ * injection so we don't spend ~3-4k tokens per turn on prompts
+ * that are clearly not about the wiki.
+ */
+export function hasWikiTrigger(prompt: string): boolean {
+  if (typeof prompt !== "string" || prompt.length === 0) return false;
+  const lower = prompt.toLowerCase();
+  for (const pattern of WIKI_TRIGGERS) {
+    if (lower.includes(pattern.toLowerCase())) return true;
+  }
+  return false;
+}
