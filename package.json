@@ -1,7 +1,7 @@
 {
   "name": "pi-llm-wiki",
-  "version": "0.1.0",
-  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.1: /wiki:ingest (URL or local file → raw/articles/<slug>/source.md).",
+  "version": "0.2.0",
+  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.2 adds list / show / compile / query on top of v0.1 ingest.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -9,7 +9,8 @@
     "pi-extension",
     "llm-wiki",
     "wiki",
-    "ingest"
+    "ingest",
+    "rag"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,10 +39,12 @@
     "node": ">=22.19.0"
   },
   "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.81.1",
     "@earendil-works/pi-coding-agent": "^0.80.2",
     "@types/node": "^26.0.0",
     "typebox": "^1.1.38",
