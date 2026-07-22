@@ -26,6 +26,7 @@ import { parseSearchArgs, buildSearchHint } from "./search.js";
 import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
 import { buildContextForPrompt } from "./context.js";
+import { buildAgentsContext } from "./agents.js";
 
 // ─── Hub resolution + config (v0.2 + v0.9) ───────────────────────────
 
@@ -608,13 +609,17 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── before_agent_start (v0.8) — auto-inject wiki context ──────────
+  // ── before_agent_start (v0.8 + v0.11) — auto-inject context ───────
   pi.on("before_agent_start", (event) => {
+    const lang = resolveLang();
+    const agents = buildAgentsContext(lang);
     const hub = resolveHubPath();
-    if (!hub) return;
-    const block = buildContextForPrompt(hub, event.prompt);
-    if (!block) return;
-    return { systemPrompt: event.systemPrompt + "\n\n" + block };
+    const wiki = hub ? buildContextForPrompt(hub, event.prompt) : null;
+    if (!agents && !wiki) return;
+    const parts: string[] = [];
+    if (agents) parts.push(agents);
+    if (wiki) parts.push(wiki);
+    return { systemPrompt: event.systemPrompt + "\n\n" + parts.join("\n\n") };
   });
 }
 
