@@ -369,20 +369,24 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── /wiki:lint (v0.4) ──────────────────────────────────────────────
+  // ── /wiki:lint (v0.4 + v0.13) ─────────────────────────────────────
   pi.registerTool({
     name: "wiki_lint",
     label: "Wiki Lint",
     description:
       "Run 5 lint/audit checks across raw/articles/ and wiki/: frontmatter, " +
       "broken wikilinks, empty files, duplicate content, tag normalization. " +
-      "No LLM call. Returns a markdown report grouped by severity.",
-    parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, _ctx) {
+      "No LLM call. Returns a markdown report grouped by severity. " +
+      "By default raw/articles/ wikilink warnings are suppressed (raw is " +
+      "immutable source); pass `all: true` to also lint raw wikilinks.",
+    parameters: Type.Object({
+      all: Type.Optional(Type.Boolean({ description: "Also lint raw/articles/ wikilinks" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
       try {
         const hub = resolveHubPath();
         if (!hub) return errResult("No llm-wiki hub found.");
-        const r = runLint(hub);
+        const r = runLint(hub, { includeRawWikilinks: params.all });
         if (!r.ok) return errResult(r.error);
         return { content: [{ type: "text", text: formatLintReport(r) }], details: {} };
       } catch (e) {
@@ -391,11 +395,12 @@ export default function (pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("wiki:lint", {
-    description: "Run lint/audit checks on the local llm-wiki hub",
-    handler: async (_args, ctx) => {
+    description: "Run lint/audit checks on the local llm-wiki hub (use --all to also lint raw wikilinks)",
+    handler: async (args, ctx) => {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
-      const r = runLint(hub);
+      const includeAll = /--all\b/.test(args);
+      const r = runLint(hub, { includeRawWikilinks: includeAll });
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(formatLintReport(r), r.summary.errors > 0 ? "error" : r.summary.warnings > 0 ? "warning" : "info");
     },

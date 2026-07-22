@@ -54,14 +54,43 @@ describe("runLint", () => {
     expect(missing.length).toBeGreaterThan(0);
   });
 
-  it("flags broken wikilinks as warning", () => {
-    const slug = "broken000000";
+  it("flags broken wikilinks in wiki/ as warning", () => {
+    const slug = "wikibroken001";
+    mkdirSync(join(tmp, "wiki", slug), { recursive: true });
+    writeFileSync(
+      join(tmp, "wiki", slug, "index.md"),
+      '---\ntitle: "x"\nsource_slugs: ["x"]\ncompiled_at: "2026-07-22T00:00:00Z"\n---\nSee [[NoSuchSlug]] for details.',
+    );
+    const r = runLint(tmp);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const wl = r.issues.find((i) => i.check === "wikilink");
+    expect(wl?.severity).toBe("warning");
+    expect(wl?.message).toContain("NoSuchSlug");
+  });
+
+  it("suppresses raw/ wikilink warnings by default (raw is immutable)", () => {
+    const slug = "rawbreak0001";
     mkdirSync(join(tmp, "raw", "articles", slug), { recursive: true });
     writeFileSync(
       join(tmp, "raw", "articles", slug, "source.md"),
       '---\ntitle: "x"\nsource: "file"\ningested_at: "2026-07-22T00:00:00Z"\ntags: []\n---\nSee [[NoSuchSlug]] for details.',
     );
     const r = runLint(tmp);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const wikilinkIssues = r.issues.filter((i) => i.check === "wikilink");
+    expect(wikilinkIssues).toHaveLength(0);
+  });
+
+  it("includes raw/ wikilink warnings when includeRawWikilinks is true", () => {
+    const slug = "rawbreak0002";
+    mkdirSync(join(tmp, "raw", "articles", slug), { recursive: true });
+    writeFileSync(
+      join(tmp, "raw", "articles", slug, "source.md"),
+      '---\ntitle: "x"\nsource: "file"\ningested_at: "2026-07-22T00:00:00Z"\ntags: []\n---\nSee [[NoSuchSlug]] for details.',
+    );
+    const r = runLint(tmp, { includeRawWikilinks: true });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const wl = r.issues.find((i) => i.check === "wikilink");

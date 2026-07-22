@@ -256,8 +256,29 @@ function checkTags(hub: string, file: string): LintIssue[] {
 
 /**
  * Run all checks across raw/articles/ and wiki/. Pure function.
+ *
+ * Behaviour:
+ *   - All checks (frontmatter, empty, wikilink, duplicate, tags) run on wiki/.
+ *   - Raw files are checked for everything EXCEPT wikilinks — those are
+ *     suppressed by default because raw is the original source and may
+ *     contain self-referential cross-links to documents not in this hub.
+ *   - Pass { includeRawWikilinks: true } to also lint raw wikilinks.
  */
-export function runLint(hub: string): LintResult {
+export interface LintOptions {
+  includeRawWikilinks?: boolean;
+}
+
+/**
+ * Run all checks across raw/articles/ and wiki/. Pure function.
+ *
+ * Behaviour:
+ *   - All checks (frontmatter, empty, wikilink, duplicate, tags) run on wiki/.
+ *   - Raw files are checked for everything EXCEPT wikilinks — those are
+ *     suppressed by default because raw is the original source and may
+ *     contain self-referential cross-links to documents not in this hub.
+ *   - Pass { includeRawWikilinks: true } to also lint raw wikilinks.
+ */
+export function runLint(hub: string, opts: LintOptions = {}): LintResult {
   if (!existsSync(hub)) {
     return { ok: false, error: `Hub path does not exist: ${hub}` };
   }
@@ -266,15 +287,17 @@ export function runLint(hub: string): LintResult {
   for (const root of roots) {
     if (existsSync(root)) files.push(...listMarkdownFiles(root));
   }
-  // Skip the _index.md files themselves (they don't need linting)
   const target = files.filter((f) => !f.endsWith("_index.md"));
   const allFilesSet = new Set(target.map((f) => relative(hub, f)));
 
   const issues: LintIssue[] = [];
   for (const f of target) {
+    const isRaw = relative(hub, f).startsWith("raw/");
     issues.push(...checkFrontmatter(hub, f));
     issues.push(...checkEmpty(hub, f));
-    issues.push(...checkWikilinks(hub, f, allFilesSet));
+    if (!isRaw || opts.includeRawWikilinks) {
+      issues.push(...checkWikilinks(hub, f, allFilesSet));
+    }
     issues.push(...checkTags(hub, f));
   }
   issues.push(...checkDuplicates(hub, target));
