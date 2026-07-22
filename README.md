@@ -74,6 +74,15 @@ If neither exists, the extension prints a friendly "No llm-wiki hub found"
 message. **No automatic creation** — set up the hub first with `claude`,
 `codex`, or manually with `mkdir -p ~/wiki/topics/<your-topic>`.
 
+## Agent reference
+
+LLM agents (Claude Code, Codex, OpenCode, etc.) operating inside a Pi session
+that has this extension installed can read [AGENTS.md](./AGENTS.md) for a
+quick reference of the workflow, tools, and core principles. The Korean
+version is [AGENTS-ko.md](./AGENTS-ko.md). Llm-wiki's broader portable
+protocol (which inspired this extension) lives at
+<https://github.com/nvk/llm-wiki/blob/master/AGENTS.md>.
+
 ## Quick start
 
 ```bash
