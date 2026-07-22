@@ -13,7 +13,9 @@ stays small and the data stays in your local `~/wiki/` hub.
 
 | Version | Features |
 |---|---|
-| **v0.9** (current) | `default_lang` config for compile/merge/query (e.g. respond in Korean) |
+| **v0.15** (current) | `/wiki:query --quick/--deep/--list` — depth selector: quick (index-only), list (grep table, no LLM), deep (full grep + LLM) |
+| v0.14 | `/wiki:lint --fix` — auto-fix missing frontmatter fields + broken wikilinks → plain text |
+| v0.9 | `default_lang` config for compile/merge/query (e.g. respond in Korean) |
 | v0.8 | Multi-source compile (`/wiki:merge`), dedup with `--force`, tag filters, auto wiki context injection |
 | v0.7 | URL ingest uses `turndown` for proper HTML→Markdown (was naive regex in v0.1–v0.6) |
 | v0.6 | `/wiki:add` (ingest + compile in one call) |
@@ -36,8 +38,8 @@ Six slash commands, each paired with an LLM-callable tool:
 | `/wiki:ls` | `wiki_ls` | List all ingested articles (markdown table; `--tag <name>` to filter) | ❌ |
 | `/wiki:show <slug>` | `wiki_show` | Display one article's frontmatter + body | ❌ |
 | `/wiki:compile` | `wiki_compile` | LLM-summarize raw → `wiki/<slug>/index.md` | ✅ (uses Pi's current model) |
-| `/wiki:query <text>` | `wiki_query` | Grep + LLM-synthesized one-paragraph answer | ✅ |
-| `/wiki:lint` | `wiki_lint` | 5-check audit (frontmatter, wikilinks, empty, duplicates, tags) | ❌ |
+| `/wiki:query <text>` | `wiki_query` | Grep + LLM-synthesized answer (`--quick`/`--deep`/`--list`) | ✅ (`--list`: ❌) |
+| `/wiki:lint` | `wiki_lint` | 5-check audit (frontmatter, wikilinks, empty, duplicates, tags) + `--fix` auto-repair | ❌ |
 | `/wiki:index` | `wiki_index` | Show or `--rebuild` `wiki/_index.md` | ❌ |
 | `/wiki:search <query>` | (slash only) | LLM WebSearch + auto-ingest top N URLs | ✅ (LLM does the search) |
 | `/wiki:add <URL\|path>` | `wiki_add` | Ingest + compile in one call (use `--no-compile` to skip the LLM step) | ✅ (compile step only) |
@@ -135,6 +137,14 @@ pi -e ./src/index.ts
 # v0.8: merge multiple sources into one wiki article
 > /wiki:merge --sources slug1,slug2,slug3
 > /wiki:merge --sources slug1,slug2 --slug btc-overview
+
+# v0.14: auto-fix lint issues
+> /wiki:lint --fix          # frontmatter field insertion, broken wikilinks → plain text
+
+# v0.15: query depth selector
+> /wiki:query "lightning" --quick   # scan only _index.md files (fast)
+> /wiki:query "lightning" --list    # grep results as table, no LLM
+> /wiki:query "lightning" --deep    # full grep + LLM synthesis (default)
 ```
 
 ## Output formats
@@ -168,6 +178,33 @@ pi -e ./src/index.ts
 | wikilink | `raw/articles/3238dd749ace/source.md` | 14 | Broken wikilink: [[bitcoin-basics]] |
 ```
 
+### `lint --fix` (auto-repair)
+
+```markdown
+## lint report + fix
+
+**Files scanned:** 2  |  **Errors:** 0  |  **Warnings:** 1  |  **Info:** 1
+
+### WARNING (1)
+| check | path | line | message |
+|-------|------|------|---------|
+| wikilink | `wiki/abc123def456/index.md` | 14 | Broken wikilink: [[bitcoin-basics]] |
+
+### /path/to/wiki/abc123def456/index.md
+- fixed: Replaced 1 broken wikilink(s) with plain text
+
+**Total fixes applied: 1**
+```
+
+### `query --list` (grep table, no LLM)
+
+```markdown
+| citation | excerpt |
+|----------|---------|
+| `wiki/abc123def456/index.md` | 14: The Lightning Network is a Layer 2 ... |
+| `raw/articles/xyz789/source.md` | 22: Lightning enables fast payments ... |
+```
+
 ### `query` (LLM-synthesized answer + path:line citations)
 
 ```markdown
@@ -191,11 +228,12 @@ pi-llm-wiki/
 │   ├── compile.ts        # v0.2: raw → LLM → wiki/<slug>/index.md (single + multi-source)
 │   ├── query.ts          # v0.2: grep → LLM synthesis
 │   ├── lint.ts           # v0.4: 5 audit checks + report formatter
+│   ├── fix.ts            # v0.14: auto-fix frontmatter + broken wikilinks
 │   ├── search.ts         # v0.5: indirect search (LLM hint + WebSearch)
 │   ├── add.ts            # v0.6: runAdd chains ingest + compile
 │   ├── context.ts        # v0.8: auto-inject wiki excerpts into system prompt
 │   ├── llm.ts            # v0.2: Pi AI wrapper (complete via ctx.model)
-│   └── __tests__/        # 151 vitest unit tests
+│   └── __tests__/        # vitest unit tests
 └── dist/                 # tsc build output
 ```
 
