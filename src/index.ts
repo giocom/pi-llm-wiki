@@ -22,6 +22,7 @@ import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRa
 import { runCompile } from "./compile.js";
 import { runQuery } from "./query.js";
 import { runLint, formatLintReport } from "./lint.js";
+import { parseSearchArgs, buildSearchHint } from "./search.js";
 import { callLlm } from "./llm.js";
 
 // ─── Hub resolution (inline for v0.2) ─────────────────────────────────
@@ -388,6 +389,24 @@ export default function (pi: ExtensionAPI): void {
       const r = listWikiArticles(hub);
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(formatWikiArticlesTable(r.articles), "info");
+    },
+  });
+
+  // ── /wiki:search (v0.5) ────────────────────────────────────────────
+  pi.registerCommand("wiki:search", {
+    description: "Search the web via the LLM and ingest the top N URLs (uses WebSearch tool)",
+    handler: async (args, ctx) => {
+      const parsed = parseSearchArgs(args);
+      if ("error" in parsed) {
+        ctx.ui.notify(parsed.error, "warning");
+        return;
+      }
+      const hint = buildSearchHint(parsed.request);
+      ctx.ui.notify(
+        `Searching for "${parsed.request.query}" (limit ${parsed.request.limit}, tag: ${hint.tag})…`,
+        "info",
+      );
+      pi.sendUserMessage(hint.prompt, { deliverAs: "followUp" });
     },
   });
 }

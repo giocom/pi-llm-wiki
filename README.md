@@ -13,7 +13,8 @@ stays small and the data stays in your local `~/wiki/` hub.
 
 | Version | Features |
 |---|---|
-| **v0.4** (current) | `ingest`, `ls`, `show`, `compile`, `query`, `lint`, `index` + auto-rebuilt `_index.md` |
+| **v0.5** (current) | Adds `/wiki:search` (LLM-driven web search + auto-ingest) on top of v0.4 |
+| v0.4 | `ingest`, `ls`, `show`, `compile`, `query`, `lint`, `index` + auto-rebuilt `_index.md` |
 | v0.3 | Auto-rebuild `raw/articles/_index.md` on ingest/compile |
 | v0.2 | `ls`, `show`, `compile`, `query` |
 | v0.1 | `ingest` (URL or local file) |
@@ -34,6 +35,7 @@ Six slash commands, each paired with an LLM-callable tool:
 | `/wiki:query <text>` | `wiki_query` | Grep + LLM-synthesized one-paragraph answer | ✅ |
 | `/wiki:lint` | `wiki_lint` | 5-check audit (frontmatter, wikilinks, empty, duplicates, tags) | ❌ |
 | `/wiki:index` | `wiki_index` | Show or `--rebuild` `wiki/_index.md` | ❌ |
+| `/wiki:search <query>` | (slash only) | LLM WebSearch + auto-ingest top N URLs | ✅ (LLM does the search) |
 
 ## Install
 
@@ -94,6 +96,10 @@ pi -e ./src/index.ts
 
 # Force-rebuild the wiki index
 > /wiki:index --rebuild
+
+# Search the web and auto-ingest (requires Pi's WebSearch tool enabled)
+> /wiki:search "llm-wiki" --limit 3
+> /wiki:search "lightning network" --limit 5
 ```
 
 ## Output formats
@@ -150,6 +156,7 @@ pi-llm-wiki/
 │   ├── compile.ts        # v0.2: raw → LLM → wiki/<slug>/index.md
 │   ├── query.ts          # v0.2: grep → LLM synthesis
 │   ├── lint.ts           # v0.4: 5 audit checks + report formatter
+│   ├── search.ts         # v0.5: indirect search (LLM hint + WebSearch)
 │   ├── llm.ts            # v0.2: Pi AI wrapper (complete via ctx.model)
 │   └── __tests__/        # 76 vitest unit tests
 └── dist/                 # tsc build output
