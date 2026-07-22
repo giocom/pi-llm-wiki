@@ -4,7 +4,7 @@
  * Pure file-system reads under <hub>/raw/articles/. No LLM, no Pi dep.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
 
 // ─── Frontmatter parsing (minimal) ────────────────────────────────────
@@ -181,3 +181,73 @@ export function showArticle(hub: string, slug: string): ShowResult {
 
 // Re-export basename for test convenience.
 export { basename, statSync };
+
+// ─── Index file (raw/articles/_index.md) ──────────────────────────────
+
+export const RAW_INDEX_FILENAME = "_index.md";
+
+/**
+ * Build the markdown content of raw/articles/_index.md from the current
+ * article list. Wraps the table with a small YAML-style frontmatter and
+ * a generated-at timestamp.
+ */
+export function buildRawIndexContent(articles: ArticleInfo[]): string {
+  const generatedAt = new Date().toISOString();
+  const table = formatArticlesTable(articles);
+  return [
+    "---",
+    "type: index",
+    `generated_at: ${yamlQuote(generatedAt)}`,
+    `count: ${articles.length}`,
+    "---",
+    "",
+    `# raw/articles index`,
+    "",
+    table,
+    "",
+  ].join("\n");
+}
+
+function yamlQuote(s: string): string {
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Rebuild <hub>/raw/articles/_index.md from the current directory contents.
+ * Idempotent — overwrites any existing file. Returns the absolute path.
+ * If the articles directory doesn't exist, it (and the index file) are
+ * created empty.
+ */
+export function rebuildRawIndex(hub: string): { ok: true; path: string; count: number } | { ok: false; error: string } {
+  const root = join(hub, "raw", "articles");
+  const r = listArticles(hub);
+  if (!r.ok) return r;
+  try {
+    mkdirSync(root, { recursive: true });
+    const filePath = join(root, RAW_INDEX_FILENAME);
+    writeFileSync(filePath, buildRawIndexContent(r.articles), "utf8");
+    return { ok: true, path: filePath, count: r.articles.length };
+  } catch (err) {
+    return { ok: false, error: `write error: ${(err as Error).message}` };
+  }
+}
+
+/**
+ * Read raw/articles/_index.md if it exists. Returns `missing: true` on
+ * the error path when the file simply does not exist (distinguishable
+ * from a real read error).
+ */
+export function readRawIndex(
+  hub: string,
+): { ok: true; content: string } | { ok: false; error: string; missing: boolean } {
+  const filePath = join(hub, "raw", "articles", RAW_INDEX_FILENAME);
+  if (!existsSync(filePath)) {
+    return { ok: false, error: "Index file does not exist", missing: true };
+  }
+  try {
+    const content = readFileSync(filePath, "utf8");
+    return { ok: true, content };
+  } catch (err) {
+    return { ok: false, error: `read error: ${(err as Error).message}`, missing: false };
+  }
+}

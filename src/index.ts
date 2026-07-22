@@ -18,7 +18,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { runIngest, parseInput, type IngestInput } from "./ingest.js";
-import { listArticles, formatArticlesTable, showArticle } from "./list.js";
+import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRawIndex } from "./list.js";
 import { runCompile } from "./compile.js";
 import { runQuery } from "./query.js";
 import { callLlm } from "./llm.js";
@@ -120,9 +120,12 @@ export default function (pi: ExtensionAPI): void {
           ? { kind: "url", url: params.url!, tags: params.tags }
           : { kind: "file", path: params.path!, tags: params.tags };
         const r = await runIngest(hub, input);
-        return r.ok
-          ? { content: [{ type: "text", text: r.summary }], details: {} }
-          : errResult(r.error);
+        if (r.ok) {
+          const idx = rebuildRawIndex(hub);
+          const suffix = idx.ok ? `\nIndex: ${idx.path} (${idx.count} articles)` : `\nIndex update failed: ${idx.error}`;
+          return { content: [{ type: "text", text: r.summary + suffix }], details: {} };
+        }
+        return errResult(r.error);
       } catch (e) {
         return errResult((e as Error).message);
       }
@@ -136,7 +139,14 @@ export default function (pi: ExtensionAPI): void {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
       const r = await runIngest(hub, parsed.input);
-      ctx.ui.notify(r.ok ? r.summary : r.error, r.ok ? "info" : "error");
+      if (r.ok) {
+        ctx.ui.notify(r.summary, "info");
+        const idx = rebuildRawIndex(hub);
+        if (idx.ok) ctx.ui.notify(`Index updated: ${idx.count} articles`, "info");
+        else ctx.ui.notify(`Index update failed: ${idx.error}`, "warning");
+      } else {
+        ctx.ui.notify(r.error, "error");
+      }
     },
   });
 
@@ -150,6 +160,8 @@ export default function (pi: ExtensionAPI): void {
       try {
         const hub = resolveHubPath();
         if (!hub) return errResult("No llm-wiki hub found.");
+        const idx = readRawIndex(hub);
+        if (idx.ok) return { content: [{ type: "text", text: idx.content }], details: {} };
         const r = listArticles(hub);
         if (!r.ok) return errResult(r.error);
         return { content: [{ type: "text", text: formatArticlesTable(r.articles) }], details: {} };
@@ -163,6 +175,8 @@ export default function (pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      const idx = readRawIndex(hub);
+      if (idx.ok) return ctx.ui.notify(idx.content, "info");
       const r = listArticles(hub);
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(formatArticlesTable(r.articles), "info");
@@ -220,6 +234,8 @@ export default function (pi: ExtensionAPI): void {
         const r = await runCompile(hub, { hub, topic: params.topic }, caller);
         if (!r.ok) return errResult(r.error);
         const lines = r.compiled.map((c) => `Compiled ${c.slug} → ${c.wikiPath} (${c.bytesIn} → ${c.bytesOut} bytes)`);
+        const idx = rebuildRawIndex(hub);
+        if (idx.ok) lines.push(`Index updated: ${idx.count} articles`);
         return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
       } catch (e) {
         return errResult((e as Error).message);
@@ -239,6 +255,9 @@ export default function (pi: ExtensionAPI): void {
       for (const c of r.compiled) {
         ctx.ui.notify(`Compiled ${c.slug} → ${c.wikiPath}`, "info");
       }
+      const idx = rebuildRawIndex(hub);
+      if (idx.ok) ctx.ui.notify(`Index updated: ${idx.count} articles`, "info");
+      else ctx.ui.notify(`Index update failed: ${idx.error}`, "warning");
     },
   });
 

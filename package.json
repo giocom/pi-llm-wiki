@@ -1,7 +1,7 @@
 {
   "name": "pi-llm-wiki",
-  "version": "0.2.0",
-  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.2 adds list / show / compile / query on top of v0.1 ingest.",
+  "version": "0.3.0",
+  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.3: auto-rebuild raw/articles/_index.md on ingest/compile. v0.2 added list / show / compile / query. v0.1 added ingest.",
   "type": "module",
   "license": "MIT",
   "keywords": [
