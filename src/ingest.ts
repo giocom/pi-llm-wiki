@@ -31,8 +31,8 @@ export type ParsedInput =
   | { kind: "file"; path: string };
 
 export type IngestInput =
-  | { kind: "url"; url: string; tags?: string[] }
-  | { kind: "file"; path: string; tags?: string[] };
+  | { kind: "url"; url: string; tags?: string[]; force?: boolean }
+  | { kind: "file"; path: string; tags?: string[]; force?: boolean };
 
 export interface IngestMeta {
   title: string;
@@ -44,7 +44,7 @@ export interface IngestMeta {
 }
 
 export type IngestResult =
-  | { ok: true; slug: string; writtenPath: string; summary: string }
+  | { ok: true; slug: string; writtenPath: string; summary: string; duplicate?: boolean }
   | { ok: false; error: string };
 
 // ─── Input parsing ────────────────────────────────────────────────────
@@ -217,6 +217,48 @@ export function writeIngestedFile(
   return filePath;
 }
 
+/**
+ * v0.8 dedup: check whether the proposed slug already has a source.md
+ * and, if so, whether the existing body is identical to the proposed
+ * one. Returns one of:
+ *   - { kind: "missing" }  — no existing source.md, safe to write
+ *   - { kind: "identical" } — same content already there (idempotent ok)
+ *   - { kind: "different", existingPath, existingTitle } — conflict
+ */
+export function checkDuplicate(
+  hub: string,
+  slug: string,
+  proposedBody: string,
+):
+  | { kind: "missing" }
+  | { kind: "identical" }
+  | { kind: "different"; existingPath: string; existingTitle: string } {
+  const filePath = join(hub, "raw", "articles", slug, "source.md");
+  if (!existsSync(filePath)) return { kind: "missing" };
+  let existing: string;
+  try {
+    existing = readFileSync(filePath, "utf8");
+  } catch {
+    return { kind: "missing" };
+  }
+  if (stripIngestedAt(existing) === stripIngestedAt(proposedBody)) return { kind: "identical" };
+  // Extract title from the existing file for the error message
+  let existingTitle = "(no title)";
+  if (existing.startsWith("---")) {
+    const end = existing.indexOf("\n---", 3);
+    if (end > 0) {
+      const fm = existing.slice(3, end);
+      const m = /title:\s*"([^"]*)"/.exec(fm);
+      if (m) existingTitle = m[1]!;
+    }
+  }
+  return { kind: "different", existingPath: filePath, existingTitle };
+}
+
+function stripIngestedAt(s: string): string {
+  return s.replace(/^ingested_at:\s*".*?"\s*\n?/m, "");
+}
+
 // ─── Top-level entry ──────────────────────────────────────────────────
 
 /**
@@ -304,6 +346,28 @@ export async function runIngest(hub: string, input: IngestInput): Promise<Ingest
 
   const frontmatter = buildFrontmatter(meta);
   const full = `${frontmatter}\n\n${body}\n`;
+
+  if (!input.force) {
+    const dup = checkDuplicate(hub, slug, full);
+    if (dup.kind === "different") {
+      return {
+        ok: false,
+        error:
+          `Slug "${slug}" already exists with different content. ` +
+          `Existing title: "${dup.existingTitle}". ` +
+          `Re-run with --force to overwrite.`,
+      };
+    }
+    if (dup.kind === "identical") {
+      return {
+        ok: true,
+        slug,
+        writtenPath: join(hub, "raw", "articles", slug, "source.md"),
+        summary: `No-op: ${meta.source} "${meta.title}" is identical to existing ingest (slug: ${slug})`,
+        duplicate: true,
+      };
+    }
+  }
 
   let writtenPath: string;
   try {

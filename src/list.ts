@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, relative } from "node:path";
 
 // ─── Frontmatter parsing (minimal) ────────────────────────────────────
 
@@ -45,6 +45,17 @@ export function parseFrontmatter(content: string): {
 
     if (value === "[]") {
       meta[key] = [];
+      i++;
+      continue;
+    }
+    if (value.startsWith("[") && value.endsWith("]")) {
+      const inner = value.slice(1, -1).trim();
+      if (inner === "") {
+        meta[key] = [];
+      } else {
+        const parts = inner.split(",").map((s) => unquote(s.trim())).filter((s) => s.length > 0);
+        meta[key] = parts;
+      }
       i++;
       continue;
     }
@@ -96,7 +107,7 @@ export type ListResult =
  * List all ingested articles under <hub>/raw/articles/.
  * Each slug is a directory containing source.md.
  */
-export function listArticles(hub: string): ListResult {
+export function listArticles(hub: string, tag?: string): ListResult {
   const root = join(hub, "raw", "articles");
   if (!existsSync(root)) {
     return { ok: true, articles: [] };
@@ -107,6 +118,7 @@ export function listArticles(hub: string): ListResult {
   } catch (err) {
     return { ok: false, error: `readdir error: ${(err as Error).message}` };
   }
+  const wantTag = tag ? tag.toLowerCase().trim() : undefined;
   const articles: ArticleInfo[] = [];
   for (const slug of entries.sort()) {
     const sourcePath = join(root, slug, "source.md");
@@ -118,11 +130,15 @@ export function listArticles(hub: string): ListResult {
       continue;
     }
     const { meta } = parseFrontmatter(content);
+    const tags = Array.isArray(meta.tags) ? meta.tags : [];
+    if (wantTag && !tags.some((t) => t.toLowerCase().trim() === wantTag)) {
+      continue;
+    }
     articles.push({
       slug,
       title: typeof meta.title === "string" ? meta.title : slug,
       source: typeof meta.source === "string" ? meta.source : "unknown",
-      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      tags,
       ingestedAt: typeof meta.ingested_at === "string" ? meta.ingested_at : "",
     });
   }
@@ -181,6 +197,54 @@ export function showArticle(hub: string, slug: string): ShowResult {
 
 // Re-export basename for test convenience.
 export { basename, statSync };
+
+/**
+ * Get the effective tags for any markdown file in the hub.
+ * - raw/articles/<slug>/source.md → its own frontmatter tags
+ * - wiki/<slug>/index.md          → union of all source_slugs' tags
+ * - anything else                  → []
+ */
+export function tagsForFile(hub: string, filePath: string): string[] {
+  const rel = relative(hub, filePath).replace(/\\/g, "/");
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+  const { meta } = parseFrontmatter(content);
+  if (rel.startsWith("raw/articles/")) {
+    return Array.isArray(meta.tags) ? meta.tags : [];
+  }
+  if (rel.startsWith("wiki/")) {
+    const sources = Array.isArray(meta.source_slugs) ? meta.source_slugs : [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const slug of sources) {
+      const sourcePath = join(hub, "raw", "articles", slug, "source.md");
+      for (const t of tagsForFile(hub, sourcePath)) {
+        const norm = t.toLowerCase().trim();
+        if (!seen.has(norm)) {
+          seen.add(norm);
+          out.push(t);
+        }
+      }
+    }
+    return out;
+  }
+  return [];
+}
+
+/**
+ * v0.8 tag filter helper used by query.ts. Returns true if the file
+ * matches the requested tag (case-insensitive). When `tag` is empty
+ * or undefined, every file matches.
+ */
+export function fileMatchesTag(hub: string, filePath: string, tag?: string): boolean {
+  if (!tag || tag.trim() === "") return true;
+  const want = tag.toLowerCase().trim();
+  return tagsForFile(hub, filePath).some((t) => t.toLowerCase().trim() === want);
+}
 
 // ─── Index file (raw/articles/_index.md) ──────────────────────────────
 

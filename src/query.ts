@@ -13,11 +13,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { callLlm, type LlmResult } from "./llm.js";
+import { fileMatchesTag } from "./list.js";
 
 export interface QueryOptions {
   hub: string;
   query: string;
   maxMatches?: number;
+  /** When set, only files whose effective tags include this value (case-insensitive) are considered. */
+  tag?: string;
 }
 
 export interface QueryMatch {
@@ -108,15 +111,17 @@ function rankMatches(matches: QueryMatch[]): QueryMatch[] {
 }
 
 /**
- * Run the grep step only. No LLM call.
+ * Run the grep step only. No LLM call. When `tag` is set, only files
+ * whose effective tags include it (case-insensitive) are searched.
  */
-export function grepHub(hub: string, query: string, maxMatches = 5): QueryMatch[] {
+export function grepHub(hub: string, query: string, maxMatches = 5, tag?: string): QueryMatch[] {
   if (query.trim().length === 0) return [];
   const roots = [join(hub, "wiki"), join(hub, "raw", "articles")];
   const all: QueryMatch[] = [];
   for (const root of roots) {
     if (!existsSync(root)) continue;
     for (const file of listMarkdownFiles(root)) {
+      if (tag && !fileMatchesTag(hub, file, tag)) continue;
       all.push(...grepFile(hub, file, query));
     }
   }
@@ -169,7 +174,7 @@ export async function runQuery(
   if (!existsSync(opts.hub)) {
     return { ok: false, error: `Hub path does not exist: ${opts.hub}` };
   }
-  const matches = grepHub(opts.hub, opts.query, opts.maxMatches ?? 5);
+  const matches = grepHub(opts.hub, opts.query, opts.maxMatches ?? 5, opts.tag);
   if (llmCaller === null) {
     return {
       ok: true,

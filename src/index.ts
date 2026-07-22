@@ -19,12 +19,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { runIngest, parseInput, type IngestInput } from "./ingest.js";
 import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRawIndex, rebuildWikiIndex, readWikiIndex, formatWikiArticlesTable, listWikiArticles } from "./list.js";
-import { runCompile } from "./compile.js";
+import { runCompile, runCompileMulti, parseCompileMultiArgs } from "./compile.js";
 import { runQuery } from "./query.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { parseSearchArgs, buildSearchHint } from "./search.js";
 import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
+import { buildContextForPrompt } from "./context.js";
 
 // ─── Hub resolution (inline for v0.2) ─────────────────────────────────
 
@@ -112,6 +113,7 @@ export default function (pi: ExtensionAPI): void {
       url: Type.Optional(Type.String()),
       path: Type.Optional(Type.String()),
       tags: Type.Optional(Type.Array(Type.String())),
+      force: Type.Optional(Type.Boolean({ description: "Overwrite an existing slug with different content" })),
     }),
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       try {
@@ -120,8 +122,8 @@ export default function (pi: ExtensionAPI): void {
         if (params.source === "url" && !params.url) return errResult("source=url requires `url`.");
         if (params.source === "file" && !params.path) return errResult("source=file requires `path`.");
         const input: IngestInput = params.source === "url"
-          ? { kind: "url", url: params.url!, tags: params.tags }
-          : { kind: "file", path: params.path!, tags: params.tags };
+          ? { kind: "url", url: params.url!, tags: params.tags, force: params.force }
+          : { kind: "file", path: params.path!, tags: params.tags, force: params.force };
         const r = await runIngest(hub, input);
         if (r.ok) {
           const idx = rebuildRawIndex(hub);
@@ -158,11 +160,18 @@ export default function (pi: ExtensionAPI): void {
     name: "wiki_ls",
     label: "Wiki List",
     description: "List all ingested articles in the local llm-wiki hub as a markdown table.",
-    parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, _ctx) {
+    parameters: Type.Object({
+      tag: Type.Optional(Type.String({ description: "Filter by tag (case-insensitive)" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
       try {
         const hub = resolveHubPath();
         if (!hub) return errResult("No llm-wiki hub found.");
+        if (params.tag) {
+          const r = listArticles(hub, params.tag);
+          if (!r.ok) return errResult(r.error);
+          return { content: [{ type: "text", text: formatArticlesTable(r.articles) }], details: {} };
+        }
         const idx = readRawIndex(hub);
         if (idx.ok) return { content: [{ type: "text", text: idx.content }], details: {} };
         const r = listArticles(hub);
@@ -174,10 +183,17 @@ export default function (pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("wiki:ls", {
-    description: "List ingested articles",
-    handler: async (_args, ctx) => {
+    description: "List ingested articles (use --tag <name> to filter)",
+    handler: async (args, ctx) => {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      const tagMatch = /--tag[=\s]+(\S+)/.exec(args);
+      const tag = tagMatch?.[1];
+      if (tag) {
+        const r = listArticles(hub, tag);
+        if (!r.ok) return ctx.ui.notify(r.error, "error");
+        return ctx.ui.notify(formatArticlesTable(r.articles), "info");
+      }
       const idx = readRawIndex(hub);
       if (idx.ok) return ctx.ui.notify(idx.content, "info");
       const r = listArticles(hub);
@@ -279,6 +295,7 @@ export default function (pi: ExtensionAPI): void {
     parameters: Type.Object({
       query: Type.String({ description: "What to search for" }),
       max_matches: Type.Optional(Type.Number({ description: "Max grep matches (default 5)" })),
+      tag: Type.Optional(Type.String({ description: "Filter by tag (case-insensitive)" })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       try {
@@ -286,7 +303,7 @@ export default function (pi: ExtensionAPI): void {
         if (!hub) return errResult("No llm-wiki hub found.");
         const caller = makeLlmCaller(ctx);
         const r = await runQuery(
-          { hub, query: params.query, maxMatches: params.max_matches },
+          { hub, query: params.query, maxMatches: params.max_matches, tag: params.tag },
           caller,
         );
         if (!r.ok) return errResult(r.error);
@@ -297,15 +314,17 @@ export default function (pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("wiki:query", {
-    description: "Search the wiki and ask the current Pi model for an answer",
+    description: "Search the wiki and ask the current Pi model for an answer (use --tag <name> to filter)",
     handler: async (args, ctx) => {
-      const query = args.trim();
-      if (!query) return ctx.ui.notify("Usage: /wiki:query <text>", "warning");
+      const tagMatch = /--tag[=\s]+(\S+)/.exec(args);
+      const tag = tagMatch?.[1];
+      const query = args.replace(/--tag[=\s]+\S+/g, "").trim();
+      if (!query) return ctx.ui.notify("Usage: /wiki:query <text> [--tag <name>]", "warning");
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
       ctx.ui.notify("Searching…", "info");
       const caller = makeLlmCaller(ctx);
-      const r = await runQuery({ hub, query }, caller);
+      const r = await runQuery({ hub, query, tag }, caller);
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(r.answer, "info");
     },
@@ -490,6 +509,74 @@ export default function (pi: ExtensionAPI): void {
       const idx = rebuildRawIndex(hub);
       if (idx.ok) ctx.ui.notify(`Raw index updated: ${idx.count} articles`, "info");
     },
+  });
+
+  // ── /wiki:merge (v0.8) ─────────────────────────────────────────────
+  pi.registerTool({
+    name: "wiki_merge",
+    label: "Wiki Merge",
+    description:
+      "Compile multiple raw sources into a single wiki article. " +
+      "Uses the current Pi model to synthesize the inputs.",
+    parameters: Type.Object({
+      sources: Type.Array(Type.String(), { description: "Source slugs to merge" }),
+      slug: Type.Optional(Type.String({ description: "Output wiki slug (default: merged-<timestamp>)" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      try {
+        const hub = resolveHubPath();
+        if (!hub) return errResult("No llm-wiki hub found.");
+        if (params.sources.length === 0) return errResult("At least one source slug is required.");
+        const caller = makeLlmCaller(ctx);
+        const r = await runCompileMulti(
+          { hub, sources: params.sources, slug: params.slug },
+          caller,
+        );
+        if (!r.ok) return errResult(r.error);
+        const lines: string[] = [];
+        for (const c of r.compiled) {
+          lines.push(`Merged ${c.sourceSlugs.length} sources → ${c.wikiPath} (${c.bytesIn} → ${c.bytesOut} bytes)`);
+        }
+        const widx = rebuildWikiIndex(hub);
+        if (widx.ok) lines.push(`Wiki index updated: ${widx.count} articles`);
+        return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+      } catch (e) {
+        return errResult((e as Error).message);
+      }
+    },
+  });
+  pi.registerCommand("wiki:merge", {
+    description: "Merge multiple raw sources into one wiki article (--sources slug1,slug2 [--slug out])",
+    handler: async (args, ctx) => {
+      const parsed = parseCompileMultiArgs(args);
+      if ("error" in parsed) {
+        ctx.ui.notify(parsed.error, "warning");
+        return;
+      }
+      const hub = resolveHubPath();
+      if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      ctx.ui.notify(`Merging ${parsed.sources.length} sources…`, "info");
+      const caller = makeLlmCaller(ctx);
+      const r = await runCompileMulti(
+        { hub, sources: parsed.sources, slug: parsed.slug },
+        caller,
+      );
+      if (!r.ok) return ctx.ui.notify(r.error, "error");
+      for (const c of r.compiled) {
+        ctx.ui.notify(`Merged → ${c.wikiPath}`, "info");
+      }
+      const widx = rebuildWikiIndex(hub);
+      if (widx.ok) ctx.ui.notify(`Wiki index updated: ${widx.count} articles`, "info");
+    },
+  });
+
+  // ── before_agent_start (v0.8) — auto-inject wiki context ──────────
+  pi.on("before_agent_start", (event) => {
+    const hub = resolveHubPath();
+    if (!hub) return;
+    const block = buildContextForPrompt(hub, event.prompt);
+    if (!block) return;
+    return { systemPrompt: event.systemPrompt + "\n\n" + block };
   });
 }
 

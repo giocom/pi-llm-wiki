@@ -13,7 +13,8 @@ stays small and the data stays in your local `~/wiki/` hub.
 
 | Version | Features |
 |---|---|
-| **v0.7** (current) | URL ingest uses `turndown` for proper HTML→Markdown (was naive regex in v0.1–v0.6) |
+| **v0.8** (current) | Multi-source compile (`/wiki:merge`), dedup with `--force`, tag filters, auto wiki context injection |
+| v0.7 | URL ingest uses `turndown` for proper HTML→Markdown (was naive regex in v0.1–v0.6) |
 | v0.6 | `/wiki:add` (ingest + compile in one call) |
 | v0.5 | `/wiki:search` (LLM-driven web search + auto-ingest) |
 | v0.4 | `ingest`, `ls`, `show`, `compile`, `query`, `lint`, `index` + auto-rebuilt `_index.md` |
@@ -31,7 +32,7 @@ Six slash commands, each paired with an LLM-callable tool:
 | Slash | Tool | Purpose | LLM? |
 |---|---|---|---|
 | `/wiki:ingest <URL\|path>` | `wiki_ingest` | Add a source to `raw/articles/<slug>/source.md` | ❌ (fetches URL if URL) |
-| `/wiki:ls` | `wiki_ls` | List all ingested articles (markdown table) | ❌ |
+| `/wiki:ls` | `wiki_ls` | List all ingested articles (markdown table; `--tag <name>` to filter) | ❌ |
 | `/wiki:show <slug>` | `wiki_show` | Display one article's frontmatter + body | ❌ |
 | `/wiki:compile` | `wiki_compile` | LLM-summarize raw → `wiki/<slug>/index.md` | ✅ (uses Pi's current model) |
 | `/wiki:query <text>` | `wiki_query` | Grep + LLM-synthesized one-paragraph answer | ✅ |
@@ -39,6 +40,7 @@ Six slash commands, each paired with an LLM-callable tool:
 | `/wiki:index` | `wiki_index` | Show or `--rebuild` `wiki/_index.md` | ❌ |
 | `/wiki:search <query>` | (slash only) | LLM WebSearch + auto-ingest top N URLs | ✅ (LLM does the search) |
 | `/wiki:add <URL\|path>` | `wiki_add` | Ingest + compile in one call (use `--no-compile` to skip the LLM step) | ✅ (compile step only) |
+| `/wiki:merge --sources a,b` | `wiki_merge` | Combine multiple raw sources into one wiki article (optional `--slug out`) | ✅ |
 
 ## Install
 
@@ -108,6 +110,18 @@ pi -e ./src/index.ts
 > /wiki:add https://example.com/article --tags web
 > /wiki:add ~/notes/bitcoin.md --tags bitcoin
 > /wiki:add ~/notes/foo.md --no-compile   # ingest only, compile later
+
+# v0.8: dedup with --force
+> /wiki:ingest ~/notes/foo.md            # error if slug exists with different content
+> /wiki:ingest ~/notes/foo.md --force    # overwrite anyway
+
+# v0.8: tag filters
+> /wiki:ls --tag bitcoin
+> /wiki:query "wallet" --tag security
+
+# v0.8: merge multiple sources into one wiki article
+> /wiki:merge --sources slug1,slug2,slug3
+> /wiki:merge --sources slug1,slug2 --slug btc-overview
 ```
 
 ## Output formats
@@ -158,21 +172,36 @@ pi-llm-wiki/
 ├── tsconfig.build.json
 ├── vitest.config.ts
 ├── src/
-│   ├── index.ts          # Pi shell — 7 commands, 7 tools
+│   ├── index.ts          # Pi shell — 9 commands, 9 tools, before_agent_start hook
 │   ├── ingest.ts         # v0.1: URL/file → raw/articles/<slug>/source.md
 │   ├── list.ts           # v0.2: ls, show, parseFrontmatter, raw/wiki indexes
-│   ├── compile.ts        # v0.2: raw → LLM → wiki/<slug>/index.md
+│   ├── compile.ts        # v0.2: raw → LLM → wiki/<slug>/index.md (single + multi-source)
 │   ├── query.ts          # v0.2: grep → LLM synthesis
 │   ├── lint.ts           # v0.4: 5 audit checks + report formatter
 │   ├── search.ts         # v0.5: indirect search (LLM hint + WebSearch)
 │   ├── add.ts            # v0.6: runAdd chains ingest + compile
+│   ├── context.ts        # v0.8: auto-inject wiki excerpts into system prompt
 │   ├── llm.ts            # v0.2: Pi AI wrapper (complete via ctx.model)
-│   └── __tests__/        # 76 vitest unit tests
+│   └── __tests__/        # 151 vitest unit tests
 └── dist/                 # tsc build output
 ```
 
 The shell (`index.ts`) is the only file that touches the Pi API. All other
 modules are pure functions and unit-testable in milliseconds.
+
+### Auto wiki context injection (v0.8)
+
+On every agent turn, a `before_agent_start` hook:
+
+1. Extracts up to 5 keywords from the user's prompt (stopword filter, dedup, length cap).
+2. Greps `wiki/` and `raw/articles/` for matching lines.
+3. If matches are found, appends a `## Wiki context (auto-injected)` block to
+   the system prompt containing the excerpts with `path:line` citations.
+4. If no matches, the system prompt is left untouched (zero overhead).
+
+This means the LLM can cite the user's own wiki when answering, without
+the user having to call `/wiki:query` explicitly. The injected block is
+small (~500 tokens worst case), so context usage stays bounded.
 
 ## Development
 
