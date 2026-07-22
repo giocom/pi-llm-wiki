@@ -23,6 +23,7 @@ import { runCompile } from "./compile.js";
 import { runQuery } from "./query.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { parseSearchArgs, buildSearchHint } from "./search.js";
+import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
 
 // ─── Hub resolution (inline for v0.2) ─────────────────────────────────
@@ -407,6 +408,87 @@ export default function (pi: ExtensionAPI): void {
         "info",
       );
       pi.sendUserMessage(hint.prompt, { deliverAs: "followUp" });
+    },
+  });
+
+  // ── /wiki:add (v0.6) ───────────────────────────────────────────────
+  pi.registerTool({
+    name: "wiki_add",
+    label: "Wiki Add",
+    description:
+      "Ingest a source AND compile it into a wiki article in one call. " +
+      "Equivalent to /wiki:ingest followed by /wiki:compile. " +
+      "Set no_compile=true to skip the LLM step and only write the raw source.",
+    parameters: Type.Object({
+      source: Type.Union([Type.Literal("url"), Type.Literal("file")]),
+      url: Type.Optional(Type.String()),
+      path: Type.Optional(Type.String()),
+      tags: Type.Optional(Type.Array(Type.String())),
+      no_compile: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      try {
+        const hub = resolveHubPath();
+        if (!hub) return errResult("No llm-wiki hub found.");
+        if (params.source === "url" && !params.url) return errResult("source=url requires `url`.");
+        if (params.source === "file" && !params.path) return errResult("source=file requires `path`.");
+        const input: IngestInput = params.source === "url"
+          ? { kind: "url", url: params.url!, tags: params.tags }
+          : { kind: "file", path: params.path!, tags: params.tags };
+        const caller = params.no_compile ? null : makeLlmCaller(ctx);
+        const r = await runAdd(input, { hub, noCompile: params.no_compile }, caller);
+        if (!r.ok) {
+          return errResult(`${r.stage} failed: ${r.error}`);
+        }
+        const lines: string[] = [];
+        lines.push(`Ingested → ${r.ingest.writtenPath}`);
+        if (r.compile) {
+          for (const c of r.compile.compiled) {
+            lines.push(`Compiled  → ${c.wikiPath} (${c.bytesIn} → ${c.bytesOut} bytes)`);
+          }
+        } else {
+          lines.push("Compile skipped (--no-compile or no model).");
+        }
+        const idx = rebuildRawIndex(hub);
+        if (idx.ok) lines.push(`Raw index updated: ${idx.count} articles`);
+        if (r.compile) {
+          const widx = rebuildWikiIndex(hub);
+          if (widx.ok) lines.push(`Wiki index updated: ${widx.count} articles`);
+        }
+        return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+      } catch (e) {
+        return errResult((e as Error).message);
+      }
+    },
+  });
+  pi.registerCommand("wiki:add", {
+    description: "Ingest + compile in one command (URL or file path)",
+    handler: async (args, ctx) => {
+      const parsed = parseAddArgs(args);
+      if ("error" in parsed) {
+        ctx.ui.notify(parsed.error, "warning");
+        return;
+      }
+      const hub = resolveHubPath();
+      if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      ctx.ui.notify("Adding (ingest + compile)…", "info");
+      const caller = parsed.noCompile ? null : makeLlmCaller(ctx);
+      const r = await runAdd(parsed.input, { hub, noCompile: parsed.noCompile }, caller);
+      if (!r.ok) {
+        return ctx.ui.notify(`${r.stage} failed: ${r.error}`, "error");
+      }
+      ctx.ui.notify(`Ingested → ${r.ingest.writtenPath}`, "info");
+      if (r.compile) {
+        for (const c of r.compile.compiled) {
+          ctx.ui.notify(`Compiled → ${c.wikiPath}`, "info");
+        }
+        const widx = rebuildWikiIndex(hub);
+        if (widx.ok) ctx.ui.notify(`Wiki index updated: ${widx.count} articles`, "info");
+      } else {
+        ctx.ui.notify("Compile skipped.", "info");
+      }
+      const idx = rebuildRawIndex(hub);
+      if (idx.ok) ctx.ui.notify(`Raw index updated: ${idx.count} articles`, "info");
     },
   });
 }
