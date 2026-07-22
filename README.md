@@ -202,19 +202,31 @@ pi-llm-wiki/
 The shell (`index.ts`) is the only file that touches the Pi API. All other
 modules are pure functions and unit-testable in milliseconds.
 
-### Auto wiki context injection (v0.8)
+### Auto wiki context injection (v0.8 + v0.12)
 
-On every agent turn, a `before_agent_start` hook:
+On every agent turn, a `before_agent_start` hook does two optional
+injections:
 
-1. Extracts up to 5 keywords from the user's prompt (stopword filter, dedup, length cap).
-2. Greps `wiki/` and `raw/articles/` for matching lines.
-3. If matches are found, appends a `## Wiki context (auto-injected)` block to
-   the system prompt containing the excerpts with `path:line` citations.
-4. If no matches, the system prompt is left untouched (zero overhead).
+1. **AGENTS.md agent reference (v0.11, gated in v0.12)** — only when
+   the user prompt contains a wiki trigger word (`/wiki`, `wiki`,
+   `워키`, `워크`, `정리해`, `요약해`, `컴파일`, `만들어`, `ingest`,
+   `compile`, `query`, `merge`, `lint`, etc.). Avoids spending ~3-4k
+   tokens on unrelated turns. Korean variant (`AGENTS-ko.md`) is
+   preferred when `default_lang` is `ko`.
+2. **Wiki context (v0.8)** — always attempted (cheap keyword
+   extract). Up to 5 keywords are pulled from the prompt, then
+   `wiki/` and `raw/articles/` are grepped for matching lines. If
+   matches are found, appends a `## Wiki context (auto-injected)`
+   block with `path:line` citations. Zero overhead when no
+   matches.
 
-This means the LLM can cite the user's own wiki when answering, without
-the user having to call `/wiki:query` explicitly. The injected block is
-small (~500 tokens worst case), so context usage stays bounded.
+This means the LLM can cite the user's own wiki when answering
+without the user having to call `/wiki:query` explicitly, and
+the LLM has the agent reference (tool table, hub layout, core
+principles) in scope on wiki-related turns without the user
+having to paste anything. Context usage stays bounded — agent
+reference is ~9KB (only injected on trigger), wiki context is
+~500 tokens worst case.
 
 ## Development
 
