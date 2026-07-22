@@ -1,0 +1,51 @@
+{
+  "name": "pi-llm-wiki",
+  "version": "0.1.0",
+  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.1: /wiki:ingest (URL or local file → raw/articles/<slug>/source.md).",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "llm-wiki",
+    "wiki",
+    "ingest"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run",
+    "check": "npm run typecheck && npm test"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@types/node": "^26.0.0",
+    "typebox": "^1.1.38",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.7"
+  }
+}
