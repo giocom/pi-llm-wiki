@@ -268,7 +268,7 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
-      const topic = args.trim() || undefined;
+      const topic = parseTopicArg(args);
       ctx.ui.notify("Compiling…", "info");
       const caller = makeLlmCaller(ctx);
       const r = await runCompile(hub, { hub, topic }, caller);
@@ -582,4 +582,10 @@ export default function (pi: ExtensionAPI): void {
 
 function errResult(message: string): { content: Array<{ type: "text"; text: string }>; details: Record<string, never>; isError: true } {
   return { content: [{ type: "text", text: message }], details: {}, isError: true };
+}
+
+function parseTopicArg(args: string): string | undefined {
+  const m = /--topic(?:=|\s+)(\S+)/.exec(args);
+  if (!m) return undefined;
+  return m[1];
 }
