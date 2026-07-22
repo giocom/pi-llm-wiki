@@ -22,6 +22,7 @@ import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRa
 import { runCompile, runCompileMulti, parseCompileMultiArgs } from "./compile.js";
 import { runQuery } from "./query.js";
 import { runLint, formatLintReport } from "./lint.js";
+import { runFix } from "./fix.js";
 import { parseSearchArgs, buildSearchHint } from "./search.js";
 import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
@@ -369,7 +370,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── /wiki:lint (v0.4 + v0.13) ─────────────────────────────────────
+  // ── /wiki:lint (v0.4 + v0.13 + v0.14 --fix) ────────────────────────
   pi.registerTool({
     name: "wiki_lint",
     label: "Wiki Lint",
@@ -378,9 +379,12 @@ export default function (pi: ExtensionAPI): void {
       "broken wikilinks, empty files, duplicate content, tag normalization. " +
       "No LLM call. Returns a markdown report grouped by severity. " +
       "By default raw/articles/ wikilink warnings are suppressed (raw is " +
-      "immutable source); pass `all: true` to also lint raw wikilinks.",
+      "immutable source); pass `all: true` to also lint raw wikilinks. " +
+      "Pass `fix: true` to apply safe mechanical fixes (frontmatter field " +
+      "insertion, broken wikilink → plain text).",
     parameters: Type.Object({
       all: Type.Optional(Type.Boolean({ description: "Also lint raw/articles/ wikilinks" })),
+      fix: Type.Optional(Type.Boolean({ description: "Apply safe mechanical fixes" })),
     }),
     async execute(_id, params, _signal, _onUpdate, _ctx) {
       try {
@@ -388,6 +392,22 @@ export default function (pi: ExtensionAPI): void {
         if (!hub) return errResult("No llm-wiki hub found.");
         const r = runLint(hub, { includeRawWikilinks: params.all });
         if (!r.ok) return errResult(r.error);
+        if (params.fix) {
+          const fix = runFix(hub, r.issues);
+          if (!fix.ok) return errResult(fix.error);
+          const lines: string[] = ["## lint report + fix", "", formatLintReport(r), ""];
+          for (const f of fix.results) {
+            const fixedCount = f.fixed.length;
+            const unfixableCount = f.unfixable.length;
+            if (fixedCount === 0 && unfixableCount === 0) continue;
+            lines.push(`### ${f.path}`);
+            lines.push("");
+            for (const fx of f.fixed) lines.push(`- fixed: ${fx.message}`);
+            for (const uf of f.unfixable) lines.push(`- needs LLM: ${uf.message}`);
+            lines.push("");
+          }
+          return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
+        }
         return { content: [{ type: "text", text: formatLintReport(r) }], details: {} };
       } catch (e) {
         return errResult((e as Error).message);
@@ -395,13 +415,32 @@ export default function (pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("wiki:lint", {
-    description: "Run lint/audit checks on the local llm-wiki hub (use --all to also lint raw wikilinks)",
+    description: "Run lint/audit checks on the local llm-wiki hub (use --all to lint raw, --fix to apply safe mechanical fixes)",
     handler: async (args, ctx) => {
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
       const includeAll = /--all\b/.test(args);
+      const wantFix = /--fix\b/.test(args);
       const r = runLint(hub, { includeRawWikilinks: includeAll });
       if (!r.ok) return ctx.ui.notify(r.error, "error");
+      if (wantFix) {
+        const fix = runFix(hub, r.issues);
+        if (!fix.ok) return ctx.ui.notify(fix.error, "error");
+        const lines: string[] = ["## lint report + fix", "", formatLintReport(r), ""];
+        let totalFixed = 0;
+        for (const f of fix.results) {
+          totalFixed += f.fixed.length;
+          if (f.fixed.length === 0 && f.unfixable.length === 0) continue;
+          lines.push(`### ${f.path}`);
+          lines.push("");
+          for (const fx of f.fixed) lines.push(`- fixed: ${fx.message}`);
+          for (const uf of f.unfixable) lines.push(`- needs LLM: ${uf.message}`);
+          lines.push("");
+        }
+        lines.push(`**Total fixes applied: ${totalFixed}**`);
+        ctx.ui.notify(lines.join("\n"), "info");
+        return;
+      }
       ctx.ui.notify(formatLintReport(r), r.summary.errors > 0 ? "error" : r.summary.warnings > 0 ? "warning" : "info");
     },
   });

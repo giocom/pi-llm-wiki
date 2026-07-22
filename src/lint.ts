@@ -77,16 +77,39 @@ function checkFrontmatter(hub: string, file: string): LintIssue[] {
     return issues;
   }
   const { meta } = parseFrontmatter(content);
-  const required = ["title", "source", "ingested_at"];
+  const rel = relative(hub, file);
+  const isWiki = rel.startsWith("wiki/");
+  const required = isWiki
+    ? ["title", "source_slugs", "compiled_at"]
+    : ["title", "source", "ingested_at"];
   for (const key of required) {
     const v = meta[key];
-    if (typeof v !== "string" || v.length === 0) {
+    if (v === undefined || v === null) {
       issues.push({
         severity: "error",
         check: "frontmatter",
         path: relative(hub, file),
         message: `Missing required field: \`${key}\``,
       });
+      continue;
+    }
+    if (typeof v === "string" && v.length === 0) {
+      issues.push({
+        severity: "error",
+        check: "frontmatter",
+        path: relative(hub, file),
+        message: `Missing required field: \`${key}\``,
+      });
+      continue;
+    }
+    if (Array.isArray(v) && v.length === 0) {
+      issues.push({
+        severity: "error",
+        check: "frontmatter",
+        path: relative(hub, file),
+        message: `Missing required field: \`${key}\``,
+      });
+      continue;
     }
   }
   return issues;
