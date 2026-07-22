@@ -1,7 +1,7 @@
 {
   "name": "pi-llm-wiki",
-  "version": "0.8.0",
-  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.8: multi-compile + dedup + tag filter + auto context. v0.7: turndown. v0.6: /wiki:add. v0.5: /wiki:search. v0.4: lint+wiki index. v0.3: auto raw index. v0.2: list/show/compile/query. v0.1: ingest.",
+  "version": "0.9.0",
+  "description": "Pi extension that brings llm-wiki workflows to Pi, one feature at a time. v0.9: default_lang. v0.8: multi-compile + dedup + tag filter + auto context. v0.7: turndown. v0.6: /wiki:add. v0.5: /wiki:search. v0.4: lint+wiki index. v0.3: auto raw index. v0.2: list/show/compile/query. v0.1: ingest.",
   "type": "module",
   "license": "MIT",
   "keywords": [

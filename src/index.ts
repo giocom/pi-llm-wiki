@@ -27,25 +27,48 @@ import { runAdd, parseAddArgs } from "./add.js";
 import { callLlm } from "./llm.js";
 import { buildContextForPrompt } from "./context.js";
 
-// ─── Hub resolution (inline for v0.2) ─────────────────────────────────
+// ─── Hub resolution + config (v0.2 + v0.9) ───────────────────────────
 
-function resolveHubPath(): string | null {
+interface HubConfig {
+  hubPath: string;
+  defaultLang: string | null;
+}
+
+function readHubConfig(): HubConfig {
   const home = homedir();
   const configPath = join(home, ".config", "llm-wiki", "config.json");
-  const fallback = join(home, "wiki");
   if (existsSync(configPath)) {
     try {
-      const cfg = JSON.parse(readFileSync(configPath, "utf8")) as { hub_path?: string };
+      const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+        hub_path?: string;
+        default_lang?: string;
+      };
+      let hubPath: string | null = null;
       if (typeof cfg.hub_path === "string" && cfg.hub_path.length > 0) {
         const expanded = expandHome(cfg.hub_path);
-        if (existsSync(expanded)) return expanded;
+        if (existsSync(expanded)) hubPath = expanded;
       }
+      const defaultLang =
+        typeof cfg.default_lang === "string" && cfg.default_lang.trim().length > 0
+          ? cfg.default_lang.trim()
+          : null;
+      if (hubPath) return { hubPath, defaultLang };
     } catch {
       // fall through
     }
   }
-  if (existsSync(fallback)) return fallback;
-  return null;
+  const fallback = join(home, "wiki");
+  if (existsSync(fallback)) return { hubPath: fallback, defaultLang: null };
+  return { hubPath: "", defaultLang: null };
+}
+
+function resolveHubPath(): string | null {
+  const c = readHubConfig();
+  return c.hubPath || null;
+}
+
+function resolveLang(): string | null {
+  return readHubConfig().defaultLang;
 }
 
 function expandHome(p: string): string {
@@ -92,10 +115,25 @@ function parseIngestArgs(args: string): { input: IngestInput; positional: string
 type LlmCaller = (prompt: { system: string; user: string }) => Promise<{ text: string; modelId: string }>;
 
 function makeLlmCaller(ctx: { modelRegistry: unknown; model: unknown }): LlmCaller {
-  return async (prompt) => callLlm(
-    ctx as Parameters<typeof callLlm>[0],
-    { systemPrompt: prompt.system, userPrompt: prompt.user },
-  );
+  const lang = resolveLang();
+  return async (prompt) => {
+    const systemPrompt = lang
+      ? `${prompt.system}\n\nRespond in ${humanizeLang(lang)}.`
+      : prompt.system;
+    return callLlm(
+      ctx as Parameters<typeof callLlm>[0],
+      { systemPrompt, userPrompt: prompt.user },
+    );
+  };
+}
+
+function humanizeLang(lang: string): string {
+  const m = lang.toLowerCase();
+  if (m === "ko" || m === "korean" || m === "kr") return "Korean";
+  if (m === "ja" || m === "japanese" || m === "jp") return "Japanese";
+  if (m === "zh" || m === "chinese" || m === "cn") return "Chinese";
+  if (m === "en" || m === "english") return "English";
+  return lang;
 }
 
 // ─── Extension registration ──────────────────────────────────────────

@@ -13,7 +13,8 @@ stays small and the data stays in your local `~/wiki/` hub.
 
 | Version | Features |
 |---|---|
-| **v0.8** (current) | Multi-source compile (`/wiki:merge`), dedup with `--force`, tag filters, auto wiki context injection |
+| **v0.9** (current) | `default_lang` config for compile/merge/query (e.g. respond in Korean) |
+| v0.8 | Multi-source compile (`/wiki:merge`), dedup with `--force`, tag filters, auto wiki context injection |
 | v0.7 | URL ingest uses `turndown` for proper HTML→Markdown (was naive regex in v0.1–v0.6) |
 | v0.6 | `/wiki:add` (ingest + compile in one call) |
 | v0.5 | `/wiki:search` (LLM-driven web search + auto-ingest) |
@@ -65,6 +66,9 @@ Claude Code, Codex, OpenCode, and Pi:
 
 1. `~/.config/llm-wiki/config.json` → `hub_path` (after `~` expansion)
 2. `~/wiki` (fallback)
+
+Optional config keys (v0.9):
+- `default_lang` — language code (`ko`, `ja`, `en`, ...) used by `/wiki:compile`, `/wiki:merge`, and `/wiki:query` to instruct the LLM to respond in that language. Example: `"default_lang": "ko"`.
 
 If neither exists, the extension prints a friendly "No llm-wiki hub found"
 message. **No automatic creation** — set up the hub first with `claude`,
