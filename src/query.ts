@@ -21,6 +21,14 @@ export interface QueryOptions {
   maxMatches?: number;
   /** When set, only files whose effective tags include this value (case-insensitive) are considered. */
   tag?: string;
+  /**
+   * v0.15 depth selector:
+   *   - "list" (default for --list): grep + markdown table, no LLM
+   *   - "quick": only the wiki/_index.md and raw/articles/_index.md
+   *   - "deep" (default): full grep + LLM synthesis
+   * When `list` is set, llmCaller is bypassed regardless of input.
+   */
+  depth?: "quick" | "deep" | "list";
 }
 
 export interface QueryMatch {
@@ -128,6 +136,42 @@ export function grepHub(hub: string, query: string, maxMatches = 5, tag?: string
   return rankMatches(all).slice(0, maxMatches);
 }
 
+/**
+ * v0.15 quick-mode grep: only scan the two index files
+ * (raw/articles/_index.md and wiki/_index.md). Much faster than
+ * full hub grep; intended for "what's in this hub" lookups.
+ */
+export function grepIndexes(hub: string, query: string, tag?: string): QueryMatch[] {
+  if (query.trim().length === 0) return [];
+  const roots = [join(hub, "raw", "articles", "_index.md"), join(hub, "wiki", "_index.md")];
+  const all: QueryMatch[] = [];
+  for (const file of roots) {
+    if (!existsSync(file)) continue;
+    if (tag) {
+      // Indexes are markdown tables; tag-aware filtering on the file
+      // itself is meaningless. Skip the tag filter for indexes.
+    }
+    all.push(...grepFile(hub, file, query));
+  }
+  return rankMatches(all).slice(0, 10);
+}
+
+/**
+ * v0.15: render matches as a compact markdown table for the --list
+ * mode. Each row shows the citation and a one-line excerpt preview.
+ */
+export function formatMatchTable(matches: QueryMatch[]): string {
+  if (matches.length === 0) return "No matches.";
+  const lines: string[] = [];
+  lines.push("| citation | excerpt |");
+  lines.push("|----------|---------|");
+  for (const m of matches) {
+    const excerpt = m.excerpt.replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 200);
+    lines.push(`| \`${m.citation}\` | ${excerpt} |`);
+  }
+  return lines.join("\n");
+}
+
 export function buildQueryPrompt(matches: QueryMatch[], query: string): {
   system: string;
   user: string;
@@ -174,12 +218,18 @@ export async function runQuery(
   if (!existsSync(opts.hub)) {
     return { ok: false, error: `Hub path does not exist: ${opts.hub}` };
   }
-  const matches = grepHub(opts.hub, opts.query, opts.maxMatches ?? 5, opts.tag);
-  if (llmCaller === null) {
+  const matches =
+    opts.depth === "quick"
+      ? grepIndexes(opts.hub, opts.query, opts.tag)
+      : grepHub(opts.hub, opts.query, opts.maxMatches ?? 5, opts.tag);
+  if (opts.depth === "list" || opts.depth === "quick" || llmCaller === null) {
     return {
       ok: true,
       matches,
-      answer: formatAnswerWithoutLlm(matches, opts.query),
+      answer:
+        opts.depth === "list"
+          ? formatMatchTable(matches)
+          : formatAnswerWithoutLlm(matches, opts.query),
       usedLlm: false,
     };
   }

@@ -325,25 +325,35 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── /wiki:query (v0.2) ─────────────────────────────────────────────
+  // ── /wiki:query (v0.2 + v0.15 depth) ────────────────────────────────
   pi.registerTool({
     name: "wiki_query",
     label: "Wiki Query",
     description:
       "Search the wiki and ingested articles, then ask the current Pi model to " +
-      "synthesize a one-paragraph answer with inline path:line citations.",
+      "synthesize a one-paragraph answer with inline path:line citations. " +
+      "depth=quick scans only the two _index.md files (very fast). " +
+      "depth=list returns a markdown table of matches with no LLM call. " +
+      "depth=deep (default) is the full grep + LLM synthesis.",
     parameters: Type.Object({
       query: Type.String({ description: "What to search for" }),
       max_matches: Type.Optional(Type.Number({ description: "Max grep matches (default 5)" })),
       tag: Type.Optional(Type.String({ description: "Filter by tag (case-insensitive)" })),
+      depth: Type.Optional(Type.Union([Type.Literal("quick"), Type.Literal("deep"), Type.Literal("list")])),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       try {
         const hub = resolveHubPath();
         if (!hub) return errResult("No llm-wiki hub found.");
-        const caller = makeLlmCaller(ctx);
+        const caller = params.depth === "list" ? null : makeLlmCaller(ctx);
         const r = await runQuery(
-          { hub, query: params.query, maxMatches: params.max_matches, tag: params.tag },
+          {
+            hub,
+            query: params.query,
+            maxMatches: params.max_matches,
+            tag: params.tag,
+            depth: params.depth,
+          },
           caller,
         );
         if (!r.ok) return errResult(r.error);
@@ -354,17 +364,24 @@ export default function (pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("wiki:query", {
-    description: "Search the wiki and ask the current Pi model for an answer (use --tag <name> to filter)",
+    description: "Search the wiki (--quick/--deep/--list, --tag <name> to filter)",
     handler: async (args, ctx) => {
       const tagMatch = /--tag[=\s]+(\S+)/.exec(args);
       const tag = tagMatch?.[1];
-      const query = args.replace(/--tag[=\s]+\S+/g, "").trim();
-      if (!query) return ctx.ui.notify("Usage: /wiki:query <text> [--tag <name>]", "warning");
+      let depth: "quick" | "deep" | "list" | undefined;
+      if (/\s--quick\b/.test(args)) depth = "quick";
+      else if (/\s--deep\b/.test(args)) depth = "deep";
+      else if (/\s--list\b/.test(args)) depth = "list";
+      const query = args
+        .replace(/--tag[=\s]+\S+/g, "")
+        .replace(/--quick\b|--deep\b|--list\b/g, "")
+        .trim();
+      if (!query) return ctx.ui.notify("Usage: /wiki:query <text> [--tag <name>] [--quick|--deep|--list]", "warning");
       const hub = resolveHubPath();
       if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
-      ctx.ui.notify("Searching…", "info");
-      const caller = makeLlmCaller(ctx);
-      const r = await runQuery({ hub, query, tag }, caller);
+      const caller = depth === "list" ? null : makeLlmCaller(ctx);
+      ctx.ui.notify(depth === "list" ? "Listing…" : depth === "quick" ? "Quick scanning…" : "Searching…", "info");
+      const r = await runQuery({ hub, query, tag, depth }, caller);
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(r.answer, "info");
     },
