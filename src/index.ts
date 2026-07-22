@@ -18,9 +18,10 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { runIngest, parseInput, type IngestInput } from "./ingest.js";
-import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRawIndex } from "./list.js";
+import { listArticles, formatArticlesTable, showArticle, rebuildRawIndex, readRawIndex, rebuildWikiIndex, readWikiIndex, formatWikiArticlesTable, listWikiArticles } from "./list.js";
 import { runCompile } from "./compile.js";
 import { runQuery } from "./query.js";
+import { runLint, formatLintReport } from "./lint.js";
 import { callLlm } from "./llm.js";
 
 // ─── Hub resolution (inline for v0.2) ─────────────────────────────────
@@ -235,7 +236,9 @@ export default function (pi: ExtensionAPI): void {
         if (!r.ok) return errResult(r.error);
         const lines = r.compiled.map((c) => `Compiled ${c.slug} → ${c.wikiPath} (${c.bytesIn} → ${c.bytesOut} bytes)`);
         const idx = rebuildRawIndex(hub);
-        if (idx.ok) lines.push(`Index updated: ${idx.count} articles`);
+        if (idx.ok) lines.push(`Raw index updated: ${idx.count} articles`);
+        const widx = rebuildWikiIndex(hub);
+        if (widx.ok) lines.push(`Wiki index updated: ${widx.count} articles`);
         return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
       } catch (e) {
         return errResult((e as Error).message);
@@ -256,8 +259,11 @@ export default function (pi: ExtensionAPI): void {
         ctx.ui.notify(`Compiled ${c.slug} → ${c.wikiPath}`, "info");
       }
       const idx = rebuildRawIndex(hub);
-      if (idx.ok) ctx.ui.notify(`Index updated: ${idx.count} articles`, "info");
-      else ctx.ui.notify(`Index update failed: ${idx.error}`, "warning");
+      if (idx.ok) ctx.ui.notify(`Raw index updated: ${idx.count} articles`, "info");
+      else ctx.ui.notify(`Raw index update failed: ${idx.error}`, "warning");
+      const widx = rebuildWikiIndex(hub);
+      if (widx.ok) ctx.ui.notify(`Wiki index updated: ${widx.count} articles`, "info");
+      else ctx.ui.notify(`Wiki index update failed: ${widx.error}`, "warning");
     },
   });
 
@@ -300,6 +306,88 @@ export default function (pi: ExtensionAPI): void {
       const r = await runQuery({ hub, query }, caller);
       if (!r.ok) return ctx.ui.notify(r.error, "error");
       ctx.ui.notify(r.answer, "info");
+    },
+  });
+
+  // ── /wiki:lint (v0.4) ──────────────────────────────────────────────
+  pi.registerTool({
+    name: "wiki_lint",
+    label: "Wiki Lint",
+    description:
+      "Run 5 lint/audit checks across raw/articles/ and wiki/: frontmatter, " +
+      "broken wikilinks, empty files, duplicate content, tag normalization. " +
+      "No LLM call. Returns a markdown report grouped by severity.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, _ctx) {
+      try {
+        const hub = resolveHubPath();
+        if (!hub) return errResult("No llm-wiki hub found.");
+        const r = runLint(hub);
+        if (!r.ok) return errResult(r.error);
+        return { content: [{ type: "text", text: formatLintReport(r) }], details: {} };
+      } catch (e) {
+        return errResult((e as Error).message);
+      }
+    },
+  });
+  pi.registerCommand("wiki:lint", {
+    description: "Run lint/audit checks on the local llm-wiki hub",
+    handler: async (_args, ctx) => {
+      const hub = resolveHubPath();
+      if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      const r = runLint(hub);
+      if (!r.ok) return ctx.ui.notify(r.error, "error");
+      ctx.ui.notify(formatLintReport(r), r.summary.errors > 0 ? "error" : r.summary.warnings > 0 ? "warning" : "info");
+    },
+  });
+
+  // ── /wiki:index (v0.4) ─────────────────────────────────────────────
+  pi.registerTool({
+    name: "wiki_index",
+    label: "Wiki Index",
+    description:
+      "Show or rebuild the wiki/<slug>/_index.md (compiled articles table). " +
+      "Without --rebuild, reads the existing file. With --rebuild, regenerates " +
+      "from disk.",
+    parameters: Type.Object({
+      rebuild: Type.Optional(Type.Boolean({ description: "Force rebuild from disk" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
+      try {
+        const hub = resolveHubPath();
+        if (!hub) return errResult("No llm-wiki hub found.");
+        if (params.rebuild) {
+          const r = rebuildWikiIndex(hub);
+          if (!r.ok) return errResult(r.error);
+          return { content: [{ type: "text", text: r.path }], details: {} };
+        }
+        const idx = readWikiIndex(hub);
+        if (idx.ok) return { content: [{ type: "text", text: idx.content }], details: {} };
+        const r = listWikiArticles(hub);
+        if (!r.ok) return errResult(r.error);
+        return { content: [{ type: "text", text: formatWikiArticlesTable(r.articles) }], details: {} };
+      } catch (e) {
+        return errResult((e as Error).message);
+      }
+    },
+  });
+  pi.registerCommand("wiki:index", {
+    description: "Show or rebuild wiki/_index.md (compiled articles table)",
+    handler: async (args, ctx) => {
+      const hub = resolveHubPath();
+      if (!hub) return ctx.ui.notify("No llm-wiki hub found.", "error");
+      const wantRebuild = args.trim() === "--rebuild";
+      if (wantRebuild) {
+        const r = rebuildWikiIndex(hub);
+        if (!r.ok) return ctx.ui.notify(r.error, "error");
+        ctx.ui.notify(`Wiki index rebuilt: ${r.count} articles → ${r.path}`, "info");
+        return;
+      }
+      const idx = readWikiIndex(hub);
+      if (idx.ok) return ctx.ui.notify(idx.content, "info");
+      const r = listWikiArticles(hub);
+      if (!r.ok) return ctx.ui.notify(r.error, "error");
+      ctx.ui.notify(formatWikiArticlesTable(r.articles), "info");
     },
   });
 }

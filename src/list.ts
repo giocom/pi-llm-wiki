@@ -251,3 +251,111 @@ export function readRawIndex(
     return { ok: false, error: `read error: ${(err as Error).message}`, missing: false };
   }
 }
+
+// ─── Index file (wiki/_index.md, v0.4) ────────────────────────────────
+
+export const WIKI_INDEX_FILENAME = "_index.md";
+
+export interface WikiArticleInfo {
+  slug: string;
+  title: string;
+  sourceSlugs: string[];
+  compiledAt: string;
+}
+
+/**
+ * List every compiled wiki article under <hub>/wiki/.
+ * Each slug is a directory containing index.md.
+ */
+export function listWikiArticles(hub: string): { ok: true; articles: WikiArticleInfo[] } | { ok: false; error: string } {
+  const root = join(hub, "wiki");
+  if (!existsSync(root)) return { ok: true, articles: [] };
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch (err) {
+    return { ok: false, error: `readdir error: ${(err as Error).message}` };
+  }
+  const out: WikiArticleInfo[] = [];
+  for (const slug of entries.sort()) {
+    const filePath = join(root, slug, "index.md");
+    if (!existsSync(filePath)) continue;
+    let content: string;
+    try {
+      content = readFileSync(filePath, "utf8");
+    } catch {
+      continue;
+    }
+    const { meta } = parseFrontmatter(content);
+    out.push({
+      slug,
+      title: typeof meta.title === "string" ? meta.title : slug,
+      sourceSlugs: Array.isArray(meta.source_slugs) ? meta.source_slugs : [],
+      compiledAt: typeof meta.compiled_at === "string" ? meta.compiled_at : "",
+    });
+  }
+  return { ok: true, articles: out };
+}
+
+export function formatWikiArticlesTable(articles: WikiArticleInfo[]): string {
+  if (articles.length === 0) {
+    return "No compiled wiki articles yet. Use `/wiki:compile` to build one.";
+  }
+  const lines: string[] = [];
+  lines.push("| slug | title | source_slugs | compiled_at |");
+  lines.push("|------|-------|--------------|-------------|");
+  for (const a of articles) {
+    const sources = a.sourceSlugs.length > 0
+      ? a.sourceSlugs.map((s) => `\`${s}\``).join(", ")
+      : "—";
+    const compiled = a.compiledAt ? a.compiledAt.replace("T", " ").replace(/\..*$/, "") : "—";
+    lines.push(`| \`${a.slug}\` | ${escapeMd(a.title)} | ${sources} | ${compiled} |`);
+  }
+  return lines.join("\n");
+}
+
+export function buildWikiIndexContent(articles: WikiArticleInfo[]): string {
+  const generatedAt = new Date().toISOString();
+  const table = formatWikiArticlesTable(articles);
+  return [
+    "---",
+    "type: index",
+    `generated_at: ${yamlQuote(generatedAt)}`,
+    `count: ${articles.length}`,
+    "---",
+    "",
+    `# wiki index`,
+    "",
+    table,
+    "",
+  ].join("\n");
+}
+
+export function rebuildWikiIndex(hub: string): { ok: true; path: string; count: number } | { ok: false; error: string } {
+  const root = join(hub, "wiki");
+  const r = listWikiArticles(hub);
+  if (!r.ok) return r;
+  try {
+    mkdirSync(root, { recursive: true });
+    const filePath = join(root, WIKI_INDEX_FILENAME);
+    writeFileSync(filePath, buildWikiIndexContent(r.articles), "utf8");
+    return { ok: true, path: filePath, count: r.articles.length };
+  } catch (err) {
+    return { ok: false, error: `write error: ${(err as Error).message}` };
+  }
+}
+
+export function readWikiIndex(
+  hub: string,
+): { ok: true; content: string } | { ok: false; error: string; missing: boolean } {
+  const filePath = join(hub, "wiki", WIKI_INDEX_FILENAME);
+  if (!existsSync(filePath)) {
+    return { ok: false, error: "Index file does not exist", missing: true };
+  }
+  try {
+    const content = readFileSync(filePath, "utf8");
+    return { ok: true, content };
+  } catch (err) {
+    return { ok: false, error: `read error: ${(err as Error).message}`, missing: false };
+  }
+}
